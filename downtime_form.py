@@ -20,7 +20,7 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 users = {
-    "admin": hash_password("12345"),
+    "admin": hash_password("admin"),
     "yogi": hash_password("yogi2003"),
     "arfian": hash_password("arfian"),
     "cakrahayu": hash_password("cakrahayu2003")
@@ -48,10 +48,12 @@ if not st.session_state.logged_in:
 # GOOGLE SHEETS SECTION FINAL FIX
 def get_google_sheet(sheet_name):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets, scope)
+    creds_dict = json.loads(st.secrets.to_json())  # FINAL FIX
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
     spreadsheet = client.open(sheet_name)
     return spreadsheet
+
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
