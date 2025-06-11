@@ -17,6 +17,32 @@ from oauth2client.service_account import ServiceAccountCredentials
 import hashlib
 import pandas as pd
 import shutil
+import sqlite3
+
+# === INISIALISASI DATABASE SQLITE ===
+def init_db():
+    conn = sqlite3.connect('downtime.db')
+    c = conn.cursor()
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS downtime (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tanggal_input TEXT,
+        line_produksi TEXT,
+        nama_produk TEXT,
+        kode_produk TEXT,
+        lot TEXT,
+        tanggal_produksi TEXT,
+        jenis TEXT,
+        jam TEXT,
+        durasi INTEGER,
+        komentar TEXT
+    )
+    ''')
+    conn.commit()
+    conn.close()
+
+# Panggil inisialisasi sekali saat aplikasi dijalankan
+init_db()
 
 # LOGIN SECTION
 def hash_password(password):
@@ -51,6 +77,30 @@ if not st.session_state.logged_in:
             st.error("Username atau password salah")
     st.stop()
 
+# SIMPAN KE SQLite
+def simpan_downtime_ke_sqlite(metadata, entry):
+    conn = sqlite3.connect('downtime.db')
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO downtime (
+            tanggal_input, line_produksi, nama_produk, kode_produk,
+            lot, tanggal_produksi, jenis, jam, durasi, komentar
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        str(datetime.now()),
+        metadata["line_produksi"],
+        metadata["nama_produk"],
+        metadata["kode_produk"],
+        metadata["lot"],
+        str(metadata["tanggal_produksi"]),
+        entry["jenis"],
+        entry["jam"],
+        entry["durasi"],
+        entry["komentar"]
+    ))
+    conn.commit()
+    conn.close()
+
 # GOOGLE SHEETS FINAL SUPER STABIL FIX
 def get_google_sheet(sheet_name):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -59,8 +109,20 @@ def get_google_sheet(sheet_name):
     client = gspread.authorize(creds)
     spreadsheet = client.open(sheet_name)
     return spreadsheet
+
+# LOGIN SECTION
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
+
+users = {
+    "admin": hash_password("admin"),
+    "yogi": hash_password("8081"),
+    "arfian": hash_password("2178"),
+    "cakrahayu": hash_password("cakrahayu2003"),
+    "herawati": hash_password("herawati"),
+    "rokhim": hash_password("2090"),
+    "sheva": hash_password("2175")
+}
 
 def check_login(username, password):
     return username in users and users[username] == hash_password(password)
@@ -69,16 +131,16 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    st.title("Selamat Datang")
-    username = st.text_input("Nama Anda")
-    password = st.text_input("Kata Sandi", type="password")
-    if st.button("Masuk"):
+    st.title("🔐 Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
         if check_login(username, password):
             st.session_state.logged_in = True
             st.success("Login berhasil!")
             st.rerun()
         else:
-            st.error("Nama atau Kata Sandi Anda Salah!!")
+            st.error("Username atau password salah")
     st.stop()
 
 
@@ -153,6 +215,7 @@ def find_or_create_lot_block(ws, lot, template_start_row=8, template_height=18):
 
     return new_start
 
+# Simpan ke Excel 
 def simpan_downtime_ke_excel(template_path, metadata, entry):
     wb = load_workbook(template_path)
     sheet_name = metadata["line_produksi"]
@@ -190,8 +253,9 @@ def simpan_downtime_ke_excel(template_path, metadata, entry):
 
     if not found:
         st.error(f"❌ Jenis downtime '{entry['jenis']}' tidak ditemukan pada LOT ini.")
-
+       
     wb.save(template_path)
+
 
 
 
@@ -348,14 +412,16 @@ if tambah:
             "komentar": komentar
         }
 
+        # Simpan ke SQLite (selalu dilakukan)
+        simpan_downtime_ke_sqlite(metadata, entry)
+
         # Simpan ke Excel lokal
         simpan_downtime_ke_excel(st.session_state.excel_path, metadata, entry)
 
-        # Simpan ke Google Sheet
+        # Simpan ke Google Sheet (jika internet ada)
         try:
             gsheet = get_google_sheet("DATABASE")
             simpan_downtime_ke_sheet(gsheet.sheet1, metadata, entry)
-            rows = gsheet.sheet1.get_all_records()
             st.success("✅ Data berhasil disimpan ke Google Sheet!")
         except Exception as e:
             st.warning(f"Gagal simpan ke Google Sheet: {e}")
