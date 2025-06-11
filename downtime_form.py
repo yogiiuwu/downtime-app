@@ -26,7 +26,8 @@ import hashlib
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-users = {"admin": hash_password("12345"), "yogi": hash_password("yogi2003")}
+users = {"admin": hash_password("12345"), "yogi": hash_password("yogi2003"), "arfian": hash_password("arfian"),
+         "cakrahayu": hash_password("cakrahayu2003")}
 def check_login(username, password):
     return username in users and users[username] == hash_password(password)
 
@@ -34,16 +35,16 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    st.title("🔐 Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
+    st.title("Selamat Datang")
+    username = st.text_input("Nama Anda")
+    password = st.text_input("Kata Sandi", type="password")
+    if st.button("Masuk"):
         if check_login(username, password):
             st.session_state.logged_in = True
             st.success("Login berhasil!")
             st.rerun()
         else:
-            st.error("Username atau password salah")
+            st.error("Nama atau Kata Sandi Anda Salah!!")
     st.stop()
 
 
@@ -254,7 +255,8 @@ downtime_mapping = {
 # Fungsi untuk simpan ke Google Sheet
 def simpan_downtime_ke_sheet(sheet, metadata, entry):
     sheet.append_row([
-        str(datetime.now()),  # Timestamp
+        str(datetime.now()),  
+        # Timestamp
         metadata["line_produksi"],
         metadata["nama_produk"],
         metadata["kode_produk"],
@@ -350,3 +352,4 @@ if st.session_state.history_downtime:
     st.subheader("📋 Riwayat Downtime")
     for msg in st.session_state.history_downtime:
         st.success(msg)
+
