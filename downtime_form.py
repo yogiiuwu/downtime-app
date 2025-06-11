@@ -363,7 +363,7 @@ if tambah:
             st.session_state.updated_excel = f.read()
 
         st.session_state.history_downtime.append(
-            f"✅ Downtime '{entry['lot']}' {entry['durasi']} menit @ {entry['jam']} ditambahkan."
+            f"✅ Downtime '{entry['jenis']}' {entry['durasi']} menit @ {entry['jam']} ditambahkan."
         )
 
 with col_tombol2:
