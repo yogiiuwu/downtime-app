@@ -95,7 +95,7 @@ def input_password_baru():
             st.success("Password berhasil diubah, silakan login.")
             st.session_state.reset_user = None
             st.session_state.step_reset = None
-            st.experimental_rerun()
+            st.rerun()
 
 if "step_reset" not in st.session_state:
     st.session_state.step_reset = None
