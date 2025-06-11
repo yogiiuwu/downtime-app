@@ -15,6 +15,8 @@ import json
 import ast
 from oauth2client.service_account import ServiceAccountCredentials
 import hashlib
+import pandas as pd
+import shutil
 
 # LOGIN SECTION
 def hash_password(password):
@@ -380,6 +382,58 @@ if st.session_state.history_downtime:
     st.subheader("📋 Riwayat Downtime")
     for msg in st.session_state.history_downtime:
         st.success(msg)
+        # ================= TAMBAHAN MENU DOWNLOAD =================
+st.subheader("📥 Download Data Downtime Per Bulan")
+
+try:
+    gsheet = get_google_sheet("DATABASE")
+    rows = gsheet.sheet1.get_all_records()
+    df = pd.DataFrame(rows)
+    
+    if df.empty:
+        st.warning("❌ Data Google Sheet masih kosong!")
+    else:
+        # Konversi tanggal produksi ke datetime
+        df["Tanggal Produksi"] = pd.to_datetime(df["Tanggal Produksi"], errors='coerce')
+        df = df.dropna(subset=["Tanggal Produksi"])  # Drop jika ada error parsing tanggal
+        df["Bulan-Tahun"] = df["Tanggal Produksi"].dt.strftime('%Y-%m')
+
+        bulan_options = sorted(df["Bulan-Tahun"].unique())
+        selected_bulan = st.selectbox("Pilih Bulan Produksi:", bulan_options)
+
+        if st.button("📥 Download Excel Bulanan"):
+            filtered_df = df[df["Bulan-Tahun"] == selected_bulan]
+            
+            # Buat file excel baru dari template
+            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+            shutil.copy("template_downtime_multi.xlsx", tmp_file.name)
+            tmp_file.close()
+
+            # Proses isi data per baris
+            for idx, row in filtered_df.iterrows():
+                metadata = {
+                    "nama_produk": row["Nama Produk"],
+                    "kode_produk": row["Kode Produk"],
+                    "lot": row["Lot"],
+                    "tanggal_produksi": row["Tanggal Produksi"].date(),
+                    "line_produksi": row["Line Produksi"]
+                }
+                entry = {
+                    "jenis": row["Jenis"],
+                    "jam": row["Jam"],
+                    "durasi": row["Durasi"],
+                    "komentar": row["Komentar"]
+                }
+                simpan_downtime_ke_excel(tmp_file.name, metadata, entry)
+            
+            with open(tmp_file.name, "rb") as f:
+                excel_bytes = f.read()
+            filename = f"Downtime_{selected_bulan}.xlsx"
+            st.download_button("⬇️ Klik untuk Download", data=excel_bytes, file_name=filename,
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+except Exception as e:
+    st.error(f"❌ Gagal membaca Google Sheet: {e}")
+
 if st.button("🔄 Reset Downtime Data"):
     gsheet.sheet1.clear()
     st.success("✅ Semua data downtime berhasil direset!")
