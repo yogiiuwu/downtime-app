@@ -1,4 +1,3 @@
-
 import streamlit as st
 from datetime import datetime
 from openpyxl import load_workbook
@@ -13,7 +12,39 @@ import re
 import gspread
 import json
 from oauth2client.service_account import ServiceAccountCredentials
+import hashlib
 
+# LOGIN SECTION
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+users = {
+    "admin": hash_password("12345"),
+    "yogi": hash_password("yogi2003"),
+    "arfian": hash_password("arfian"),
+    "cakrahayu": hash_password("cakrahayu2003")
+}
+
+def check_login(username, password):
+    return username in users and users[username] == hash_password(password)
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    st.title("🔐 Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if check_login(username, password):
+            st.session_state.logged_in = True
+            st.success("Login berhasil!")
+            st.rerun()
+        else:
+            st.error("Username atau password salah")
+    st.stop()
+
+# GOOGLE SHEETS SECTION
 def get_google_sheet(sheet_name):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = dict(st.secrets)
@@ -21,10 +52,6 @@ def get_google_sheet(sheet_name):
     client = gspread.authorize(creds)
     spreadsheet = client.open(sheet_name)
     return spreadsheet
-
-import streamlit as st
-import hashlib
-
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
