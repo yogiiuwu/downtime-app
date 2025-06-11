@@ -25,6 +25,7 @@ users = {
     "yogi": hash_password("yogi2003"),
     "arfian": hash_password("arfian"),
     "cakrahayu": hash_password("cakrahayu2003")
+    "herawati": hash_password("herawati")
 }
 
 def check_login(username, password):
@@ -57,8 +58,6 @@ def get_google_sheet(sheet_name):
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-users = {"admin": hash_password("12345"), "yogi": hash_password("yogi2003"), "arfian": hash_password("arfian"),
-         "cakrahayu": hash_password("cakrahayu2003")}
 def check_login(username, password):
     return username in users and users[username] == hash_password(password)
 
@@ -381,3 +380,6 @@ if st.session_state.history_downtime:
     st.subheader("📋 Riwayat Downtime")
     for msg in st.session_state.history_downtime:
         st.success(msg)
+if st.button("🔄 Reset Downtime Data"):
+    gsheet.sheet1.clear()
+    st.success("✅ Semua data downtime berhasil direset!")
