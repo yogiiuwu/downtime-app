@@ -15,14 +15,12 @@ import json
 from oauth2client.service_account import ServiceAccountCredentials
 
 def get_google_sheet(sheet_name):
-    scope = ["https://spreadsheets.google.com/feeds",
-             "https://www.googleapis.com/auth/drive"]
-    creds_dict = st.secrets  # langsung, karena seluruh secrets sekarang isinya dict
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds_dict = dict(st.secrets)
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
     spreadsheet = client.open(sheet_name)
     return spreadsheet
-
 
 import streamlit as st
 import hashlib
