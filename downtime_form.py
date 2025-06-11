@@ -11,6 +11,7 @@ from PIL import Image
 import tempfile
 import re
 import gspread
+import json
 from oauth2client.service_account import ServiceAccountCredentials
 
 def get_google_sheet(sheet_name):
