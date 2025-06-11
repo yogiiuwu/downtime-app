@@ -44,18 +44,18 @@ if not st.session_state.logged_in:
             st.error("Username atau password salah")
     st.stop()
 
-# GOOGLE SHEETS SECTION
+# GOOGLE SHEETS SECTION FINAL FIX
 def get_google_sheet(sheet_name):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-
-    # Paling simpel, karena st.secrets sudah dict
-    creds_dict = dict(st.secrets)
+    
+    # super stabil fix
+    creds_dict = json.loads(st.secrets.to_dict(as_string=True))
     
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
     spreadsheet = client.open(sheet_name)
     return spreadsheet
-
+    
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
