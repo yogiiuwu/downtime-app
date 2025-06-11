@@ -49,7 +49,7 @@ if not st.session_state.logged_in:
 # GOOGLE SHEETS FINAL SUPER STABIL FIX
 def get_google_sheet(sheet_name):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds_dict = json.loads(json.dumps(st.secrets["gcp_service_account"]))
+    creds_dict = json.loads(json.dumps(dict(st.secrets["gcp_service_account"])))
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
     spreadsheet = client.open(sheet_name)
