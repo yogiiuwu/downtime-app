@@ -63,18 +63,71 @@ def check_login(username, password):
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+# Tambahkan halaman reset password
+def reset_password():
+    st.title("🔑 Reset Password")
+
+    username = st.text_input("Masukkan Username")
+
+    if st.button("Cek Username"):
+        if username in users:
+            st.session_state.reset_user = username
+            st.session_state.step_reset = "new_password"
+            st.experimental_rerun()
+        else:
+            st.error("Username tidak ditemukan!")
+
+# Form input password baru
+def input_password_baru():
+    st.title("🔑 Buat Password Baru")
+
+    new_password = st.text_input("Masukkan Password Baru", type="password")
+    confirm_password = st.text_input("Ulangi Password Baru", type="password")
+
+    if st.button("Simpan Password Baru"):
+        if new_password != confirm_password:
+            st.error("Password tidak sama, ulangi lagi.")
+        elif new_password == "":
+            st.error("Password tidak boleh kosong.")
+        else:
+            # Simpan password baru (di-hash)
+            users[st.session_state.reset_user] = hash_password(new_password)
+            st.success("Password berhasil diubah, silakan login.")
+            st.session_state.reset_user = None
+            st.session_state.step_reset = None
+            st.experimental_rerun()
+
+if "step_reset" not in st.session_state:
+    st.session_state.step_reset = None
+
+if st.session_state.step_reset == "reset":
+    reset_password()
+    st.stop()
+
+if st.session_state.step_reset == "new_password":
+    input_password_baru()
+    st.stop()
 
 if not st.session_state.logged_in:
     st.title("🔐 Login")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if check_login(username, password):
-            st.session_state.logged_in = True
-            st.success("Login berhasil!")
+    col_login, col_lupa = st.columns(2)
+    with col_login:
+        if st.button("Login"):
+            if check_login(username, password):
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.success("Login berhasil!")
+                st.rerun()
+            else:
+                st.error("Username atau password salah")
+
+    with col_lupa:
+        if st.button("Lupa Password?"):
+            st.session_state.step_reset = "reset"
             st.rerun()
-        else:
-            st.error("Username atau password salah")
+
     st.stop()
 
 # SIMPAN KE SQLite
@@ -263,6 +316,18 @@ def simpan_downtime_ke_excel(template_path, metadata, entry):
 # ======================= STREAMLIT APP ========================
 
 st.set_page_config(page_title="DOWNTIME SOFTBAG II", layout="wide")
+
+# Tambahkan tombol logout
+col_logout, col_title = st.columns([1, 9])  # membuat 2 kolom: tombol & judul
+
+with col_logout:
+    if st.button("🔒 Logout"):
+        st.session_state.logged_in = False
+        st.session_state.username = None
+        st.rerun()
+
+with col_title:
+    st.title(f"Form Input Downtime Packing (User: {st.session_state.username})")
 
 if "excel_path" not in st.session_state:
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
