@@ -309,10 +309,6 @@ def simpan_downtime_ke_excel(template_path, metadata, entry):
        
     wb.save(template_path)
 
-
-
-
-
 # ======================= STREAMLIT APP ========================
 
 st.set_page_config(page_title="DOWNTIME SOFTBAG II", layout="wide")
