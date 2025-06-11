@@ -24,7 +24,7 @@ users = {
     "admin": hash_password("12345"),
     "yogi": hash_password("yogi2003"),
     "arfian": hash_password("arfian"),
-    "cakrahayu": hash_password("cakrahayu2003")
+    "cakrahayu": hash_password("cakrahayu2003"),
     "herawati": hash_password("herawati")
 }
 
