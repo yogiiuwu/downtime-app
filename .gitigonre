@@ -1,0 +1,18 @@
+# Ignore database file
+downtime.db
+
+# Ignore python cache files
+__pycache__/
+*.pyc
+
+# Ignore secret credentials
+creds.json
+secrets.toml
+
+# Ignore temp files (temp excel file yang dibuat streamlit)
+*.tmp
+*.temp
+
+# Ignore OS files (jika pakai Mac/Windows)
+.DS_Store
+Thumbs.db
