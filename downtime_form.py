@@ -436,6 +436,7 @@ try:
 except Exception as e:
     st.error(f"❌ Gagal membaca Google Sheet: {e}")
 
-if st.button("🔄 Reset Downtime Data"):
-    gsheet.sheet1.clear()
-    st.success("✅ Semua data downtime berhasil direset!")
+if st.session_state.get("username") == "admin":
+    if st.button("🔄 Reset Downtime Data (Admin Only)"):
+        gsheet.sheet1.clear()
+        st.success("✅ Semua data downtime berhasil direset oleh Admin!")
