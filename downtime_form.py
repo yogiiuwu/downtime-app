@@ -23,11 +23,13 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 users = {
-    "admin": hash_password("12345"),
-    "yogi": hash_password("yogi2003"),
-    "arfian": hash_password("arfian"),
+    "admin": hash_password("admin"),
+    "yogi": hash_password("8081"),
+    "arfian": hash_password("2178"),
     "cakrahayu": hash_password("cakrahayu2003"),
-    "herawati": hash_password("herawati")
+    "herawati": hash_password("herawati"),
+    "rokhim": hash_password("2090"),
+    "sheva": hash_password("2175)
 }
 
 def check_login(username, password):
