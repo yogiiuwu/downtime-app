@@ -353,8 +353,7 @@ if tambah:
             gsheet = get_google_sheet("DATABASE")
             simpan_downtime_ke_sheet(gsheet.sheet1, metadata, entry)
             rows = gsheet.sheet1.get_all_records()
-            st.write("🧾 Isi saat ini di Google Sheets:")
-            st.write(rows)
+            st.success("✅ Data berhasil disimpan ke Google Sheet!")
         except Exception as e:
             st.warning(f"Gagal simpan ke Google Sheet: {e}")
 
@@ -363,8 +362,7 @@ if tambah:
             st.session_state.updated_excel = f.read()
 
         st.session_state.history_downtime.append(
-            f"✅ Downtime '{entry['jenis']}' {entry['durasi']} menit @ {entry['jam']} ditambahkan."
-        )
+            f"✅ {metadata['nama_produk']} (LOT: {metadata['lot']}) - {entry['durasi']} menit ditambahkan.")
 
 with col_tombol2:
     with open(st.session_state.excel_path, "rb") as f:
