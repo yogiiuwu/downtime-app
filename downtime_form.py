@@ -352,4 +352,3 @@ if st.session_state.history_downtime:
     st.subheader("📋 Riwayat Downtime")
     for msg in st.session_state.history_downtime:
         st.success(msg)
-
