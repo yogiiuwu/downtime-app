@@ -29,7 +29,7 @@ users = {
     "cakrahayu": hash_password("cakrahayu2003"),
     "herawati": hash_password("herawati"),
     "rokhim": hash_password("2090"),
-    "sheva": hash_password("2175)
+    "sheva": hash_password("2175")
 }
 
 def check_login(username, password):
