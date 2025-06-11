@@ -73,7 +73,7 @@ def reset_password():
         if username in users:
             st.session_state.reset_user = username
             st.session_state.step_reset = "new_password"
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("Username tidak ditemukan!")
 
@@ -308,6 +308,10 @@ def simpan_downtime_ke_excel(template_path, metadata, entry):
         st.error(f"❌ Jenis downtime '{entry['jenis']}' tidak ditemukan pada LOT ini.")
        
     wb.save(template_path)
+
+
+
+
 
 # ======================= STREAMLIT APP ========================
 
