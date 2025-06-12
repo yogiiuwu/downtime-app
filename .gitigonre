@@ -1,5 +1,3 @@
-# Ignore database file
-downtime.db
 
 # Ignore python cache files
 __pycache__/
