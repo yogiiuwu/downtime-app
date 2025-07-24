@@ -17,6 +17,18 @@ from oauth2client.service_account import ServiceAccountCredentials
 import hashlib
 import pandas as pd
 import shutil
+import os
+
+# --- Load login state dari file jika session kosong ---
+if "logged_in" not in st.session_state:
+    try:
+        with open("login_state.json", "r") as f:
+            data = json.load(f)
+            st.session_state.logged_in = data.get("logged_in", False)
+            st.session_state.username = data.get("username", "")
+    except FileNotFoundError:
+        st.session_state.logged_in = False
+        st.session_state.username = ""
 
 # LOGIN SECTION
 def hash_password(password):
@@ -27,7 +39,7 @@ users = {
     "yogi": hash_password("8081"),
     "arfian": hash_password("2178"),
     "cakrahayu": hash_password("cakrahayu2003"),
-    "herawati": hash_password("herawati"),
+    "daffa": hash_password("8058"),
     "rokhim": hash_password("2090"),
     "sheva": hash_password("2175")
 }
@@ -92,8 +104,17 @@ if not st.session_state.logged_in:
             if check_login(username, password):
                 st.session_state.logged_in = True
                 st.session_state.username = username
+
+                # Simpan ke file login_state.json
+                with open("login_state.json", "w") as f:
+                    json.dump({
+                        "logged_in": True,
+                        "username": username
+                    }, f)
+
                 st.success("Login berhasil!")
                 st.rerun()
+
             else:
                 st.error("Username atau password salah")
 
@@ -104,10 +125,10 @@ if not st.session_state.logged_in:
 
     st.stop()
 
-# GOOGLE SHEETS FINAL SUPER STABIL FIX
+# GOOGLE SHEETS
 def get_google_sheet(sheet_name):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds_dict = json.loads(json.dumps(dict(st.secrets["gcp_service_account"])))  # FIXED FINAL VERSION
+    creds_dict = json.loads(json.dumps(dict(st.secrets["gcp_service_account"])))
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
     spreadsheet = client.open(sheet_name)
@@ -139,7 +160,7 @@ def normalize(text):
     return re.sub(r"\s+", " ", str(text).strip()).lower()
 def find_or_create_lot_block(ws, lot, template_start_row=8, template_height=18):
     max_row = ws.max_row
-    lot_column = "F"
+    lot_column = "C"
 
     # === CARI APAKAH LOT SUDAH ADA ===
     for row in range(template_start_row, max_row + 1, template_height + 2):
@@ -170,7 +191,7 @@ def find_or_create_lot_block(ws, lot, template_start_row=8, template_height=18):
                 if src_cell.fill != PatternFill():
                     dst_cell.fill = copy(src_cell.fill)
                 if src_cell.comment:
-                    dst_cell.comment = Comment(src_cell.comment.text, "User")
+                    dst_cell.comment = Comment(src_cell.comment.text, "username")
 
         # SALIN MERGE TEMPLATE
         offset = new_start - template_start_row
@@ -205,26 +226,63 @@ def find_or_create_lot_block(ws, lot, template_start_row=8, template_height=18):
     ws.cell(row=new_start, column=1).value = blok_nomor
 
     return new_start
+def isi_metadata_ke_semua_sheet(file_path, metadata, username):
+    wb = load_workbook(file_path)
+
+    for sheet in wb.sheetnames:
+        ws = wb[sheet]
+
+        try:
+            def isi(cell_pos, value, comment_title):
+                cell = ws[cell_pos]
+                if not isinstance(cell, MergedCell):
+                    cell.value = value
+
+            isi("C8", metadata["nama_produk"], "Nama Produk")
+            isi("C9", metadata["kode_produk"], "Kode Produk")
+            isi("C10", metadata["lot"], "Kode LOT")
+            isi("C11", str(metadata["tanggal_produksi"]), "Tanggal Produksi")
+
+        except Exception as e:
+            print(f"⚠️ Error isi metadata sheet {sheet}: {e}")
+
+    wb.save(file_path)
 
 # Simpan ke Excel 
 def simpan_downtime_ke_excel(template_path, metadata, entry):
     wb = load_workbook(template_path)
-    sheet_name = metadata["line_produksi"]
-    if sheet_name not in wb.sheetnames:
-        st.error(f"❌ Sheet '{sheet_name}' tidak ditemukan.")
-        return
 
+    for sheet in wb.sheetnames:
+        ws = wb[sheet]
+
+        def set_meta_if_not_merged(cell_key, value, comment_text):
+            cell = ws[cell_key]
+            if not isinstance(cell, MergedCell):
+                cell.value = value
+                cell.comment = Comment(comment_text, st.session_state.username)
+
+        set_meta_if_not_merged("C1", metadata["nama_produk"], "Nama Produk")
+        set_meta_if_not_merged("C2", metadata["kode_produk"], "Kode Produk")
+        set_meta_if_not_merged("C3", metadata["lot"], "Kode LOT")
+        set_meta_if_not_merged("C4", str(metadata["tanggal_produksi"]), "Tanggal Produksi")
+
+    # Sheet utama tempat menulis downtime
+    sheet_name = metadata["line_produksi"]
     ws = wb[sheet_name]
+
     blok_awal = find_or_create_lot_block(ws, metadata["lot"])
 
+    # Tulis metadata lagi di atas blok
     ws[f"C{blok_awal}"] = metadata["nama_produk"]
     ws[f"C{blok_awal + 1}"] = metadata["kode_produk"]
     ws[f"C{blok_awal + 2}"] = metadata["lot"]
     ws[f"C{blok_awal + 3}"] = str(metadata["tanggal_produksi"])
 
+    # Tambahkan downtime
     jenis_downtime = normalize(entry["jenis"])
     jam_index = int(str(entry["jam"]).split(":")[0]) + 5
     durasi = float(entry["durasi"])
+    durasi_sisa = durasi
     komentar = entry.get("komentar", "")
     found = False
 
@@ -232,10 +290,18 @@ def simpan_downtime_ke_excel(template_path, metadata, entry):
         row = blok_awal + i
         cell_value = ws.cell(row=row, column=4).value
         if normalize(cell_value) == jenis_downtime:
-            cell = ws.cell(row=row, column=jam_index)
-            cell.value = durasi  # Set, not add
-            if komentar:
-                cell.comment = Comment(komentar, "User")
+            while durasi_sisa > 0:
+                durasi_input = min(durasi_sisa, 60)
+                jam_col = jam_index
+                cell = ws.cell(row=row, column=jam_col)
+                if cell.value:
+                    cell.value += durasi_input
+                else:
+                    cell.value = durasi_input
+                if komentar:
+                    cell.comment = Comment(komentar, st.session_state["username"])
+                durasi_sisa -= durasi_input
+                jam_index += 1  # ke jam berikutnya
             total_menit = sum(float(ws.cell(row=row, column=col).value or 0) for col in range(5, 29))
             ws.cell(row=row, column=29).value = total_menit
             ws.cell(row=row, column=30).value = round(total_menit / 60, 2)
@@ -247,25 +313,34 @@ def simpan_downtime_ke_excel(template_path, metadata, entry):
        
     wb.save(template_path)
 
-
-
-
-
 # ======================= STREAMLIT APP ========================
 
 st.set_page_config(page_title="DOWNTIME SOFTBAG II", layout="wide")
-
 # Tambahkan tombol logout
-col_logout, col_title = st.columns([1, 9])  # membuat 2 kolom: tombol & judul
+with st.sidebar:
+    st.image("otsuka_logo.png", width=100)
 
-with col_logout:
-    if st.button("🔒 Logout"):
-        st.session_state.logged_in = False
-        st.session_state.username = None
-        st.rerun()
+    if not st.session_state.logged_in:
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.button("🔓 Login"):         
+            if username and password:
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.experimental_rerun()
+    else:
+        st.markdown(f"👤 **{st.session_state.username}**")
+        if st.button("🔒 Logout"):
+            st.session_state.logged_in = False
+            st.session_state.username = ""
 
-with col_title:
-    st.title(f"Form Input Downtime Packing (User: {st.session_state.username})")
+            # Hapus file login_state.json saat logout
+            if os.path.exists("login_state.json"):
+                os.remove("login_state.json")
+
+            st.rerun()
+
+st.title(f"Form Input Downtime Packing (User: {st.session_state.username})")
 
 if "excel_path" not in st.session_state:
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
@@ -292,8 +367,6 @@ line_options = [
     "DT ALT A", "DT ALT B", "DT Autocase A", "DT Autocase B",
     "DT Carton Erector", "DT Carton Sealing A", "DT Carton Sealing B"
 ]
-line_produksi = st.selectbox("Pilih Jenis Mesin", line_options)
-
 downtime_mapping = {
     "DT ALT A": {
         "Utility Downtime": ["Pressure Air Drop", "Listrik Padam"],
@@ -370,34 +443,36 @@ def simpan_downtime_ke_sheet(sheet, metadata, entry):
     ])
 
 # ====== FORM STREAMLIT ======
-st.subheader("📦 Data Produk")
-col1, col2 = st.columns(2)
-with col1:
-    nama_produk = st.text_input("Nama Produk")
-    kode_produk = st.text_input("Kode Produk")
-with col2:
-    lot = st.text_input("Kode LOT")
+# Di luar st.form() agar bisa dinamis:
+line_produksi = st.selectbox("Pilih Jenis Mesin", line_options, key="line_produksi")
+opsi = downtime_mapping.get(line_produksi, {})
+kategori = st.selectbox("Kategori Downtime", list(opsi.keys()), key="kategori")
+jenis = st.selectbox("Jenis Downtime", opsi.get(kategori, []), key="jenis")
+
+# Sekarang form mulai:
+with st.form("form_downtime"):
+    st.subheader("📦 Form Input Downtime")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        nama_produk = st.text_input("Nama Produk")
+    with col2:
+        kode_produk = st.text_input("Kode Produk")
+    with col3:
+        lot = st.text_input("Kode LOT")
+
     tgl_produksi = st.date_input("Tanggal Produksi", value=datetime.today())
 
-st.subheader("⏱️ Input Downtime")
-opsi = downtime_mapping.get(line_produksi, {})
-col1, col2 = st.columns(2)
-with col1:
-    kategori = st.selectbox("Kategori Downtime", list(opsi.keys()))
-with col2:
-    jenis = st.selectbox("Jenis Downtime", opsi.get(kategori, []))
-col3, col4 = st.columns(2)
-with col3:
-    jam = st.selectbox("Jam Terjadi", [f"{j:02d}:00" for j in range(24)])
-with col4:
-    durasi = st.number_input("Durasi (menit)", min_value=1, max_value=60)
-komentar = st.text_input("Komentar")
+    col4, col5 = st.columns(2)
+    with col4:
+        jam = st.selectbox("Jam Terjadi", [f"{j:02d}:00" for j in range(24)])
+    with col5:
+        durasi = st.number_input("Durasi (menit)", min_value=1)
 
-col_tombol1, col_tombol2, col_tombol3 = st.columns(3)
-with col_tombol1:
-    tambah = st.button("➕ Tambahkan Downtime")
+    komentar = st.text_area("Komentar", placeholder="tambahkan keterangan")
 
-if tambah:
+    submitted = st.form_submit_button("➕ Tambahkan Downtime")
+if submitted:
     if not nama_produk or not kode_produk or not lot:
         st.warning("⚠️ Harap isi semua data produk.")
     else:
@@ -415,10 +490,9 @@ if tambah:
             "komentar": komentar
         }
 
-        # Simpan ke Excel lokal
+        # 🟢 Tambahkan baris ini
+        isi_metadata_ke_semua_sheet(st.session_state.excel_path, metadata, st.session_state.username)
         simpan_downtime_ke_excel(st.session_state.excel_path, metadata, entry)
-
-        # Simpan ke Google Sheet (jika internet ada)
         try:
             gsheet = get_google_sheet("DATABASE")
             simpan_downtime_ke_sheet(gsheet.sheet1, metadata, entry)
@@ -426,13 +500,13 @@ if tambah:
         except Exception as e:
             st.warning(f"Gagal simpan ke Google Sheet: {e}")
 
-        # Update file Excel dan log
         with open(st.session_state.excel_path, "rb") as f:
             st.session_state.updated_excel = f.read()
 
         st.session_state.history_downtime.append(
             f"✅ {metadata['nama_produk']} (LOT: {metadata['lot']}) - {entry['durasi']} menit ditambahkan.")
 
+col_tombol2, col_tombol3 = st.columns([2, 1])
 with col_tombol2:
     with open(st.session_state.excel_path, "rb") as f:
         excel_bytes = f.read()
@@ -470,9 +544,47 @@ try:
 
         bulan_options = sorted(df["Bulan-Tahun"].unique())
         selected_bulan = st.selectbox("Pilih Bulan Produksi:", bulan_options)
-
         if st.button("📥 Download Excel Bulanan"):
             filtered_df = df[df["Bulan-Tahun"] == selected_bulan]
+            
+            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+            shutil.copy("template_downtime_multi.xlsx", tmp_file.name)
+            tmp_file.close()
+
+            # Grouping per LOT
+            lot_grouped = {}
+            for _, row in filtered_df.iterrows():
+                lot_key = row["Lot"]
+                if lot_key not in lot_grouped:
+                    lot_grouped[lot_key] = {
+                        "metadata": {
+                            "nama_produk": row["Nama Produk"],
+                            "kode_produk": row["Kode Produk"],
+                            "lot": row["Lot"],
+                            "tanggal_produksi": row["Tanggal Produksi"].date(),
+                            "line_produksi": row["Line Produksi"]
+                        },
+                        "entries": []
+                    }
+                lot_grouped[lot_key]["entries"].append({
+                    "jenis": row["Jenis"],
+                    "jam": row["Jam"],
+                    "durasi": row["Durasi"],
+                    "komentar": row["Komentar"]
+                })
+
+            for lot_data in lot_grouped.values():
+                metadata = lot_data["metadata"]
+                isi_metadata_ke_semua_sheet(tmp_file.name, metadata, st.session_state.username)
+                for entry in lot_data["entries"]:
+                    simpan_downtime_ke_excel(tmp_file.name, metadata, entry)
+
+            # Download result
+            with open(tmp_file.name, "rb") as f:
+                excel_bytes = f.read()
+            filename = f"Downtime_{selected_bulan}.xlsx"
+            st.download_button("⬇️ Klik untuk Download", data=excel_bytes, file_name=filename,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             
             # Buat file excel baru dari template
             tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
