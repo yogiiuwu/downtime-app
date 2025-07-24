@@ -17,32 +17,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 import hashlib
 import pandas as pd
 import shutil
-import sqlite3
-
-# === INISIALISASI DATABASE SQLITE ===
-def init_db():
-    conn = sqlite3.connect('downtime.db')
-    c = conn.cursor()
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS downtime (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tanggal_input TEXT,
-        line_produksi TEXT,
-        nama_produk TEXT,
-        kode_produk TEXT,
-        lot TEXT,
-        tanggal_produksi TEXT,
-        jenis TEXT,
-        jam TEXT,
-        durasi INTEGER,
-        komentar TEXT
-    )
-    ''')
-    conn.commit()
-    conn.close()
-
-# Panggil inisialisasi sekali saat aplikasi dijalankan
-init_db()
 
 # LOGIN SECTION
 def hash_password(password):
@@ -130,30 +104,6 @@ if not st.session_state.logged_in:
 
     st.stop()
 
-# SIMPAN KE SQLite
-def simpan_downtime_ke_sqlite(metadata, entry):
-    conn = sqlite3.connect('downtime.db')
-    c = conn.cursor()
-    c.execute('''
-        INSERT INTO downtime (
-            tanggal_input, line_produksi, nama_produk, kode_produk,
-            lot, tanggal_produksi, jenis, jam, durasi, komentar
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        str(datetime.now()),
-        metadata["line_produksi"],
-        metadata["nama_produk"],
-        metadata["kode_produk"],
-        metadata["lot"],
-        str(metadata["tanggal_produksi"]),
-        entry["jenis"],
-        entry["jam"],
-        entry["durasi"],
-        entry["komentar"]
-    ))
-    conn.commit()
-    conn.close()
-
 # GOOGLE SHEETS FINAL SUPER STABIL FIX
 def get_google_sheet(sheet_name):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -163,25 +113,13 @@ def get_google_sheet(sheet_name):
     spreadsheet = client.open(sheet_name)
     return spreadsheet
 
-# LOGIN SECTION
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-users = {
-    "admin": hash_password("admin"),
-    "yogi": hash_password("8081"),
-    "arfian": hash_password("2178"),
-    "cakrahayu": hash_password("cakrahayu2003"),
-    "herawati": hash_password("herawati"),
-    "rokhim": hash_password("2090"),
-    "sheva": hash_password("2175")
-}
-
 def check_login(username, password):
     return username in users and users[username] == hash_password(password)
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+if "show_summary" not in st.session_state:
+    st.session_state.show_summary = False
 
 if not st.session_state.logged_in:
     st.title("🔐 Login")
@@ -455,7 +393,7 @@ with col4:
     durasi = st.number_input("Durasi (menit)", min_value=1, max_value=60)
 komentar = st.text_input("Komentar")
 
-col_tombol1, col_tombol2 = st.columns(2)
+col_tombol1, col_tombol2, col_tombol3 = st.columns(3)
 with col_tombol1:
     tambah = st.button("➕ Tambahkan Downtime")
 
@@ -476,9 +414,6 @@ if tambah:
             "durasi": durasi,
             "komentar": komentar
         }
-
-        # Simpan ke SQLite (selalu dilakukan)
-        simpan_downtime_ke_sqlite(metadata, entry)
 
         # Simpan ke Excel lokal
         simpan_downtime_ke_excel(st.session_state.excel_path, metadata, entry)
@@ -510,7 +445,9 @@ with col_tombol2:
             tmp.write(fsrc.read())
         tmp.close()
         st.session_state.excel_path = tmp.name
-
+with col_tombol3:
+    if st.button("📊 Summary"):
+        st.session_state.show_summary = True
 if st.session_state.history_downtime:
     st.subheader("📋 Riwayat Downtime")
     for msg in st.session_state.history_downtime:
@@ -563,11 +500,103 @@ try:
                 excel_bytes = f.read()
             filename = f"Downtime_{selected_bulan}.xlsx"
             st.download_button("⬇️ Klik untuk Download", data=excel_bytes, file_name=filename,
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")                               
 except Exception as e:
     st.error(f"❌ Gagal membaca Google Sheet: {e}")
+    
+# === SUMMARY POPUP ===
+if st.session_state.show_summary:
+    st.subheader("📊 Summary Downtime")
+
+    try:
+        gsheet = get_google_sheet("DATABASE")
+        rows = gsheet.sheet1.get_all_records()
+        df = pd.DataFrame(rows)
+        
+        if df.empty:
+            st.warning("❌ Data Google Sheet masih kosong!")
+            st.session_state.show_summary = False
+        else:
+            # Proses data
+            df["Tanggal Produksi"] = pd.to_datetime(df["Tanggal Produksi"], errors='coerce')
+            df = df.dropna(subset=["Tanggal Produksi"])
+            df["Bulan-Tahun"] = df["Tanggal Produksi"].dt.strftime('%Y-%m')
+
+            bulan_options = sorted(df["Bulan-Tahun"].unique())
+            selected_bulan = st.selectbox("Pilih Bulan:", bulan_options)
+
+            df_bulan = df[df["Bulan-Tahun"] == selected_bulan]
+            summary = df_bulan.groupby("Line Produksi")["Durasi"].sum().reset_index()
+            summary = summary.sort_values("Durasi", ascending=False)
+
+            st.write("### Total Durasi per Line Produksi:")
+            for idx, row in summary.iterrows():
+                st.write(f"- **{row['Line Produksi']}**: {int(row['Durasi'])} menit")
+
+            st.write("---")
+            st.write("### Sample Komentar:")
+            for mesin in df_bulan["Line Produksi"].unique():
+                subdf = df_bulan[df_bulan["Line Produksi"] == mesin]
+                komentar_sample = subdf["Komentar"].dropna().unique()[:3]
+                st.write(f"**{mesin}**")
+                for kom in komentar_sample:
+                    st.write(f"- {kom}")
+
+    except Exception as e:
+        st.error(f"❌ Gagal membaca Google Sheet: {e}")
+
+    if st.button("❌ Close Summary"):
+        st.session_state.show_summary = False
 
 if st.session_state.get("username") == "admin":
-    if st.button("🔄 Reset Downtime Data (Admin Only)"):
-        gsheet.sheet1.clear()
-        st.success("✅ Semua data downtime berhasil direset oleh Admin!")
+    st.subheader("🔄 Reset Downtime Per Bulan")
+
+    try:
+        gsheet = get_google_sheet("DATABASE")
+        rows = gsheet.sheet1.get_all_records()
+        df = pd.DataFrame(rows)
+
+        if df.empty:
+            st.warning("❌ Data Google Sheet kosong!")
+        else:
+            # Format tanggal
+            df["Tanggal Produksi"] = pd.to_datetime(df["Tanggal Produksi"], errors='coerce')
+            df = df.dropna(subset=["Tanggal Produksi"])
+            df["Bulan-Tahun"] = df["Tanggal Produksi"].dt.strftime('%Y-%m')
+
+            bulan_options = sorted(df["Bulan-Tahun"].unique())
+            selected_bulan = st.selectbox("🗓 Pilih Bulan yang Akan Direset:", bulan_options)
+
+            if st.button("🚨 Reset Downtime Bulan Ini"):
+                st.session_state["confirm_reset"] = True
+
+            if st.session_state.get("confirm_reset", False):
+                with st.expander("⚠️ Konfirmasi Hapus Data Downtime", expanded=True):
+                    st.warning(f"Apakah kamu yakin ingin menghapus seluruh data downtime bulan **{selected_bulan}**?")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("✅ Ya, Reset Sekarang"):
+                            try:
+                                worksheet = gsheet.sheet1
+                                all_data = worksheet.get_all_values()
+                                headers = all_data[0]
+                                rows_to_keep = [headers]
+
+                                for row in all_data[1:]:
+                                    tanggal = pd.to_datetime(row[5], errors="coerce")
+                                    if pd.isna(tanggal) or tanggal.strftime('%Y-%m') != selected_bulan:
+                                        rows_to_keep.append(row)
+
+                                worksheet.clear()
+                                worksheet.update("A1", rows_to_keep)
+                                st.success(f"✅ Data bulan **{selected_bulan}** berhasil dihapus.")
+                            except Exception as e:
+                                st.error(f"❌ Gagal reset data: {e}")
+                            st.session_state["confirm_reset"] = False
+
+                    with col2:
+                        if st.button("❌ Batal"):
+                            st.session_state["confirm_reset"] = False
+
+    except Exception as e:
+        st.error(f"❌ Gagal membaca Google Sheet: {e}")
