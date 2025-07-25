@@ -21,7 +21,11 @@ import bcrypt
 
 # --- Load login state dari file jika session kosong ---
 def load_users():
-    return dict(st.secrets.get("users", {}))
+    try:
+        with open("users.json", "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
 
 def save_users(users):
     with open("users.json", "w") as f:
@@ -70,7 +74,9 @@ def reset_password():
         if username in users:
             users[username] = hash_password(new_password)
             save_users(users)
-            st.success("✅ Password berhasil direset!")
+            st.success("✅ Password berhasil direset! Kembali ke halaman login...")
+            st.session_state.step_reset = None
+            st.rerun()
         else:
             st.error("❌ Username tidak ditemukan.")
 
@@ -99,11 +105,24 @@ if "step_reset" not in st.session_state:
 
 if st.session_state.step_reset == "reset":
     reset_password()
+
+    if st.button("🔙 Kembali ke Login"):
+        st.session_state.step_reset = None
+        st.rerun()
+
     st.stop()
+
 
 if st.session_state.step_reset == "new_password":
     input_password_baru()
+
+    if st.button("🔙 Kembali ke Login"):
+        st.session_state.step_reset = None
+        st.session_state.reset_user = None
+        st.rerun()
+
     st.stop()
+
 
 if not st.session_state.logged_in:
     st.title("🔐 Login")
