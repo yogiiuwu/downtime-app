@@ -14,12 +14,24 @@ import gspread
 import json
 import ast
 from oauth2client.service_account import ServiceAccountCredentials
-import hashlib
 import pandas as pd
 import shutil
 import os
+import bcrypt
 
 # --- Load login state dari file jika session kosong ---
+def load_users():
+    try:
+        with open("users.json", "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+def save_users(users):
+    with open("users.json", "w") as f:
+        json.dump(users, f)
+
+
 if "logged_in" not in st.session_state:
     try:
         with open("login_state.json", "r") as f:
@@ -32,20 +44,16 @@ if "logged_in" not in st.session_state:
 
 # LOGIN SECTION
 def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
-users = {
-    "admin": hash_password("admin"),
-    "yogi": hash_password("8081"),
-    "arfian": hash_password("2178"),
-    "cakrahayu": hash_password("cakrahayu2003"),
-    "daffa": hash_password("8058"),
-    "rokhim": hash_password("2090"),
-    "sheva": hash_password("2175")
-}
-
+def verify_password(password, hashed_password):
+    return bcrypt.checkpw(password.encode(), hashed_password.encode())
+Users = load_users()
 def check_login(username, password):
-    return username in users and users[username] == hash_password(password)
+    users = load_users()
+    if username in users:
+        return verify_password(password, users[username])
+    return False
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -54,14 +62,21 @@ def reset_password():
     st.title("🔑 Reset Password")
 
     username = st.text_input("Masukkan Username")
+    new_password = st.text_input("Masukkan Password Baru", type="password")
+    confirm_password = st.text_input("Konfirmasi Password Baru", type="password")
 
-    if st.button("Cek Username"):
+    if st.button("Reset Password"):
+        if new_password != confirm_password:
+            st.error("❌ Password tidak cocok.")
+            return
+
+        users = load_users()
         if username in users:
-            st.session_state.reset_user = username
-            st.session_state.step_reset = "new_password"
-            st.rerun()
+            users[username] = hash_password(new_password)
+            save_users(users)
+            st.success("✅ Password berhasil direset!")
         else:
-            st.error("Username tidak ditemukan!")
+            st.error("❌ Username tidak ditemukan.")
 
 # Form input password baru
 def input_password_baru():
@@ -267,7 +282,12 @@ def simpan_downtime_ke_excel(template_path, metadata, entry):
         set_meta_if_not_merged("C4", str(metadata["tanggal_produksi"]), "Tanggal Produksi")
 
     # Sheet utama tempat menulis downtime
-    sheet_name = metadata["line_produksi"]
+    sheet_name = metadata["line_produksi"].strip()
+    # CEK: apakah sheet_name ada dalam workbook
+    if sheet_name not in wb.sheetnames:
+        st.warning(f"❌ Sheet '{sheet_name}' tidak ditemukan di template Excel.")
+        return  # atau continue kalau di loop
+
     ws = wb[sheet_name]
 
     blok_awal = find_or_create_lot_block(ws, metadata["lot"])
@@ -483,12 +503,13 @@ if submitted:
             "tanggal_produksi": tgl_produksi,
             "line_produksi": line_produksi
         }
+        metadata["line_produksi"] = line_produksi
         entry = {
             "jenis": jenis,
             "jam": jam,
             "durasi": durasi,
-            "komentar": komentar
-        }
+            "komentar": komentar,
+             }
 
         # 🟢 Tambahkan baris ini
         isi_metadata_ke_semua_sheet(st.session_state.excel_path, metadata, st.session_state.username)
@@ -543,79 +564,69 @@ try:
         df["Bulan-Tahun"] = df["Tanggal Produksi"].dt.strftime('%Y-%m')
 
         bulan_options = sorted(df["Bulan-Tahun"].unique())
-        selected_bulan = st.selectbox("Pilih Bulan Produksi:", bulan_options)
-        if st.button("📥 Download Excel Bulanan"):
+    selected_bulan = st.selectbox("Pilih Bulan Produksi:", bulan_options)
+
+    if st.button("📥 Download Excel Bulanan", key="download_bulanan"):
+        try:
+            st.write("DEBUG DF:", df.head())
+            st.write("Filtered by:", selected_bulan)
             filtered_df = df[df["Bulan-Tahun"] == selected_bulan]
-            
-            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-            shutil.copy("template_downtime_multi.xlsx", tmp_file.name)
-            tmp_file.close()
+            st.write("📊 Jumlah entri yang diproses:", len(filtered_df))
 
-            # Grouping per LOT
-            lot_grouped = {}
-            for _, row in filtered_df.iterrows():
-                lot_key = row["Lot"]
-                if lot_key not in lot_grouped:
-                    lot_grouped[lot_key] = {
-                        "metadata": {
-                            "nama_produk": row["Nama Produk"],
-                            "kode_produk": row["Kode Produk"],
-                            "lot": row["Lot"],
-                            "tanggal_produksi": row["Tanggal Produksi"].date(),
-                            "line_produksi": row["Line Produksi"]
-                        },
-                        "entries": []
-                    }
-                lot_grouped[lot_key]["entries"].append({
-                    "jenis": row["Jenis"],
-                    "jam": row["Jam"],
-                    "durasi": row["Durasi"],
-                    "komentar": row["Komentar"]
-                })
+            if filtered_df.empty:
+                st.warning("Data untuk bulan tersebut kosong.")
+            else:
+                tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+                shutil.copy("template_downtime_multi.xlsx", tmp_file.name)
+                tmp_file.close()
 
-            for lot_data in lot_grouped.values():
-                metadata = lot_data["metadata"]
-                isi_metadata_ke_semua_sheet(tmp_file.name, metadata, st.session_state.username)
-                for entry in lot_data["entries"]:
-                    simpan_downtime_ke_excel(tmp_file.name, metadata, entry)
+                lot_grouped = {}
+                for _, row in filtered_df.iterrows():
+                    lot_key = f"{row['Lot']}|{row['Line Produksi']}"
+                    if lot_key not in lot_grouped:
+                        lot_grouped[lot_key] = {
+                            "metadata": {
+                                "nama_produk": row["Nama Produk"],
+                                "kode_produk": row["Kode Produk"],
+                                "lot": row["Lot"],
+                                "tanggal_produksi": row["Tanggal Produksi"].date() if hasattr(row["Tanggal Produksi"], "date") else row["Tanggal Produksi"],
+                                "line_produksi": row["Line Produksi"]
+                            },
+                            "entries": []
+                        }
 
-            # Download result
-            with open(tmp_file.name, "rb") as f:
-                excel_bytes = f.read()
-            filename = f"Downtime_{selected_bulan}.xlsx"
-            st.download_button("⬇️ Klik untuk Download", data=excel_bytes, file_name=filename,
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            
-            # Buat file excel baru dari template
-            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-            shutil.copy("template_downtime_multi.xlsx", tmp_file.name)
-            tmp_file.close()
+                    lot_grouped[lot_key]["entries"].append({
+                        "jenis": row["Jenis"],
+                        "jam": row["Jam"],
+                        "durasi": row["Durasi"],
+                        "komentar": row["Komentar"]
+                    })
+                    
+                for lot_data in lot_grouped.values():
+                    metadata = lot_data["metadata"]
+                    isi_metadata_ke_semua_sheet(tmp_file.name, metadata, st.session_state.username)
+                    for entry in lot_data["entries"]:
+                        entry["durasi"] = float(entry["durasi"])
+                        metadata["line_produksi"] = lot_data["metadata"]["line_produksi"].strip()
+                        try:
+                            simpan_downtime_ke_excel(tmp_file.name, metadata, entry)
+                        except Exception as e:
+                            st.warning(f"Gagal menulis entry ke Excel: {e}")
 
-            # Proses isi data per baris
-            for idx, row in filtered_df.iterrows():
-                metadata = {
-                    "nama_produk": row["Nama Produk"],
-                    "kode_produk": row["Kode Produk"],
-                    "lot": row["Lot"],
-                    "tanggal_produksi": row["Tanggal Produksi"].date(),
-                    "line_produksi": row["Line Produksi"]
-                }
-                entry = {
-                    "jenis": row["Jenis"],
-                    "jam": row["Jam"],
-                    "durasi": row["Durasi"],
-                    "komentar": row["Komentar"]
-                }
-                simpan_downtime_ke_excel(tmp_file.name, metadata, entry)
-            
-            with open(tmp_file.name, "rb") as f:
-                excel_bytes = f.read()
-            filename = f"Downtime_{selected_bulan}.xlsx"
-            st.download_button("⬇️ Klik untuk Download", data=excel_bytes, file_name=filename,
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")                               
+
+
+                with open(tmp_file.name, "rb") as f:
+                    excel_bytes = f.read()
+                filename = f"Downtime_{selected_bulan}.xlsx"
+                st.download_button("⬇️ Klik untuk Download", data=excel_bytes, file_name=filename,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_button_bulanan")
+
+        except Exception as e:
+            st.error(f"Gagal membuat Excel: {e}")
+
 except Exception as e:
-    st.error(f"❌ Gagal membaca Google Sheet: {e}")
-    
+    st.error(f"Gagal membaca Google Sheet: {e}")
+
 # === SUMMARY POPUP ===
 if st.session_state.show_summary:
     st.subheader("📊 Summary Downtime")
