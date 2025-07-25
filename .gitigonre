@@ -1,6 +1,3 @@
-# Ignore database file
-downtime.db
-
 # Ignore python cache files
 __pycache__/
 *.pyc
@@ -16,3 +13,5 @@ secrets.toml
 # Ignore OS files (jika pakai Mac/Windows)
 .DS_Store
 Thumbs.db
+
+users.json
