@@ -1,7 +1,7 @@
 streamlit
 openpyxl
-Pillow
+pandas
 gspread
 oauth2client
-pandas
-bcrypt
+matplotlib
+Pillow
