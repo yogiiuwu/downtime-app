@@ -162,23 +162,11 @@ def get_google_sheet(sheet_name):
 def check_login(username, password):
     return username in users and users[username] == hash_password(password)
 
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+
 if "show_summary" not in st.session_state:
     st.session_state.show_summary = False
 
-if not st.session_state.logged_in:
-    st.title("🔐 Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if check_login(username, password):
-            st.session_state.logged_in = True
-            st.success("Login berhasil!")
-            st.rerun()
-        else:
-            st.error("Username atau password salah")
-    st.stop()
+
 
 
 def normalize(text):
@@ -272,6 +260,29 @@ def isi_metadata_ke_semua_sheet(file_path, metadata, username):
             print(f"⚠️ Error isi metadata sheet {sheet}: {e}")
 
     wb.save(file_path)
+def isi_metadata_per_sheet_tanpa_downtime(file_path, metadata, username):
+    wb = load_workbook(file_path)
+
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+
+        blok_awal = find_or_create_lot_block(ws, metadata["lot"])
+
+        # Cek apakah sudah ada metadata pada posisi ini
+        is_kosong = not (
+            ws[f"C{blok_awal}"].value and
+            ws[f"C{blok_awal + 1}"].value and
+            ws[f"C{blok_awal + 2}"].value and
+            ws[f"C{blok_awal + 3}"].value
+        )
+
+        if is_kosong:
+            ws[f"C{blok_awal}"] = metadata["nama_produk"]
+            ws[f"C{blok_awal + 1}"] = metadata["kode_produk"]
+            ws[f"C{blok_awal + 2}"] = metadata["lot"]
+            ws[f"C{blok_awal + 3}"] = str(metadata["tanggal_produksi"])
+
+    wb.save(file_path)
 
 # Simpan ke Excel 
 def simpan_downtime_ke_excel(template_path, metadata, entry):
@@ -316,28 +327,34 @@ def simpan_downtime_ke_excel(template_path, metadata, entry):
     komentar = entry.get("komentar", "")
     found = False
 
+    row_start = None
     for i in range(5, 16):
         row = blok_awal + i
         cell_value = ws.cell(row=row, column=4).value
         if normalize(cell_value) == jenis_downtime:
-            while durasi_sisa > 0:
-                durasi_input = min(durasi_sisa, 60)
-                jam_col = jam_index
-                cell = ws.cell(row=row, column=jam_col)
-                if cell.value:
-                    cell.value += durasi_input
-                else:
-                    cell.value = durasi_input
-                if komentar:
-                    cell.comment = Comment(komentar, st.session_state["username"])
-                durasi_sisa -= durasi_input
-                jam_index += 1  # ke jam berikutnya
-            total_menit = sum(float(ws.cell(row=row, column=col).value or 0) for col in range(5, 29))
-            ws.cell(row=row, column=29).value = total_menit
-            ws.cell(row=row, column=30).value = round(total_menit / 60, 2)
-            found = True
+            row_start = row
             break
 
+    found = True  # tandai bahwa jenis ditemukan
+    if row_start:
+        while durasi_sisa > 0:
+            jam_index = int(str(entry["jam"]).split(":")[0]) + 5
+            row = row_start
+            while row <= blok_awal + 15 and durasi_sisa > 0:
+                while jam_index <= 28 and durasi_sisa > 0:
+                    durasi_input = min(durasi_sisa, 60)
+                    cell = ws.cell(row=row, column=jam_index)
+                    if isinstance(cell.value, (int, float)):
+                        cell.value += durasi_input
+                    else:
+                        cell.value = durasi_input
+                    if komentar:
+                        cell.comment = Comment(komentar, st.session_state["username"])
+                    durasi_sisa -= durasi_input
+                    jam_index += 1
+                row += 1  # Geser ke baris berikutnya untuk jenis yang sama
+                jam_index = 5  # Reset jam ke awal
+                
     if not found:
         st.error(f"❌ Jenis downtime '{entry['jenis']}' tidak ditemukan pada LOT ini.")
        
@@ -558,7 +575,12 @@ if st.session_state.history_downtime:
     for msg in st.session_state.history_downtime:
         st.success(msg)
         # ================= TAMBAHAN MENU DOWNLOAD =================
-st.subheader("📥 Download Data Downtime Per Bulan")
+def get_downtime_index(sheet, jenis, start_row=10, end_row=25):
+    for row_idx in range(start_row, end_row):
+        cell_value = sheet.cell(row=row_idx, column=3).value
+        if cell_value and jenis.strip().lower() in str(cell_value).strip().lower():
+            return row_idx
+    return None
 
 try:
     gsheet = get_google_sheet("DATABASE")
@@ -574,65 +596,79 @@ try:
         df["Bulan-Tahun"] = df["Tanggal Produksi"].dt.strftime('%Y-%m')
 
         bulan_options = sorted(df["Bulan-Tahun"].unique())
-    selected_bulan = st.selectbox("Pilih Bulan Produksi:", bulan_options)
+    selected_bulan = st.selectbox("Pilih Bulan Produksi:", bulan_options, key="bulan_download")
+    st.subheader("📥 Download Data Downtime Per Bulan")
 
-    if st.button("📥 Download Excel Bulanan", key="download_bulanan"):
-        try:
-            st.write("DEBUG DF:", df.head())
-            st.write("Filtered by:", selected_bulan)
-            filtered_df = df[df["Bulan-Tahun"] == selected_bulan]
-            st.write("📊 Jumlah entri yang diproses:", len(filtered_df))
+    try:
+        gsheet = get_google_sheet("DATABASE")
+        rows = gsheet.sheet1.get_all_records()
+        df = pd.DataFrame(rows)
 
-            if filtered_df.empty:
-                st.warning("Data untuk bulan tersebut kosong.")
-            else:
-                tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-                shutil.copy("template_downtime_multi.xlsx", tmp_file.name)
-                tmp_file.close()
+        if df.empty:
+            st.warning("❌ Data Google Sheet masih kosong!")
+        else:
+            # Siapkan opsi bulan
+            df["Tanggal Produksi"] = pd.to_datetime(df["Tanggal Produksi"], errors='coerce')
+            df = df.dropna(subset=["Tanggal Produksi"])
+            df["Bulan-Tahun"] = df["Tanggal Produksi"].dt.strftime('%Y-%m')
 
-                lot_grouped = {}
-                for _, row in filtered_df.iterrows():
-                    lot_key = f"{row['Lot']}|{row['Line Produksi']}"
-                    if lot_key not in lot_grouped:
-                        lot_grouped[lot_key] = {
-                            "metadata": {
-                                "nama_produk": row["Nama Produk"],
-                                "kode_produk": row["Kode Produk"],
-                                "lot": row["Lot"],
-                                "tanggal_produksi": row["Tanggal Produksi"].date() if hasattr(row["Tanggal Produksi"], "date") else row["Tanggal Produksi"],
-                                "line_produksi": row["Line Produksi"]
-                            },
-                            "entries": []
+            bulan_options = sorted(df["Bulan-Tahun"].unique())
+
+            if st.button("📥 Download Excel Bulanan"):
+                df_bulan = df[df["Bulan-Tahun"] == selected_bulan]
+
+                if df_bulan.empty:
+                    st.warning("📭 Data untuk bulan tersebut tidak ditemukan.")
+                else:
+                    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+                    shutil.copy("template_downtime_multi.xlsx", tmp_file.name)
+                    wb = load_workbook(tmp_file.name)
+
+                    sheets = wb.sheetnames
+                    lot_groups = df_bulan.groupby("Lot")
+
+                    for lot, group in lot_groups:
+                        metadata = {
+                            "nama_produk": group.iloc[0]["Nama Produk"],
+                            "kode_produk": group.iloc[0]["Kode Produk"],
+                            "lot": group.iloc[0]["Lot"],
+                            "tanggal_produksi": pd.to_datetime(group.iloc[0]["Tanggal Produksi"]).date()
                         }
 
-                    lot_grouped[lot_key]["entries"].append({
-                        "jenis": row["Jenis"],
-                        "jam": row["Jam"],
-                        "durasi": row["Durasi"],
-                        "komentar": row["Komentar"]
-                    })
-                    
-                for lot_data in lot_grouped.values():
-                    metadata = lot_data["metadata"]
-                    isi_metadata_ke_semua_sheet(tmp_file.name, metadata, st.session_state.username)
-                    for entry in lot_data["entries"]:
-                        entry["durasi"] = float(entry["durasi"])
-                        metadata["line_produksi"] = lot_data["metadata"]["line_produksi"].strip()
-                        try:
-                            simpan_downtime_ke_excel(tmp_file.name, metadata, entry)
-                        except Exception as e:
-                            st.warning(f"Gagal menulis entry ke Excel: {e}")
+                        for sheet_name in sheets:
+                            ws = wb[sheet_name]
+                            blok_awal = find_or_create_lot_block(ws, lot)
 
+                            ws[f"C{blok_awal}"] = metadata["nama_produk"]
+                            ws[f"C{blok_awal + 1}"] = metadata["kode_produk"]
+                            ws[f"C{blok_awal + 2}"] = metadata["lot"]
+                            ws[f"C{blok_awal + 3}"] = str(metadata["tanggal_produksi"])
 
+                        for _, row in group.iterrows():
+                            sheet_name = row["Line Produksi"]
+                            if sheet_name not in wb.sheetnames:
+                                continue
 
-                with open(tmp_file.name, "rb") as f:
-                    excel_bytes = f.read()
-                filename = f"Downtime_{selected_bulan}.xlsx"
-                st.download_button("⬇️ Klik untuk Download", data=excel_bytes, file_name=filename,
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_button_bulanan")
+                            ws = wb[sheet_name]
+                            blok_awal = find_or_create_lot_block(ws, row["Lot"])
+                            print(f"🔎 Sheet: {sheet_name}, LOT: {row['Lot']}, Jenis: {row['Jenis']}, Jam: {row['Jam']}, Durasi: {row['Durasi']}")
 
-        except Exception as e:
-            st.error(f"Gagal membuat Excel: {e}")
+                            row_jenis = get_downtime_index(ws, row["Jenis"], start_row=blok_awal + 4)
+                            if row_jenis:
+                                jam = str(row["Jam"]).split(":")[0].zfill(2) + ":00"
+                                jam_col_map = {f"{i:02}:00": chr(71 + i) for i in range(24)}
+                                kolom = jam_col_map.get(jam)
+                                if kolom:
+                                    ws[f"{kolom}{row_jenis}"].value = int(row["Durasi"])
+
+                    wb.save(tmp_file.name)
+                    st.success("✅ File Excel berhasil dibuat.")
+                    with open(tmp_file.name, "rb") as f:
+                        st.download_button("📁 Klik untuk Download", f.read(), file_name=f"Downtime_{selected_bulan}.xlsx")
+
+    except Exception as e:
+        st.error(f"❌ Terjadi kesalahan saat memproses download bulanan: {e}")
+
 
 except Exception as e:
     st.error(f"Gagal membaca Google Sheet: {e}")
@@ -645,45 +681,77 @@ if st.session_state.show_summary:
         gsheet = get_google_sheet("DATABASE")
         rows = gsheet.sheet1.get_all_records()
         df = pd.DataFrame(rows)
-        
+
         if df.empty:
             st.warning("❌ Data Google Sheet masih kosong!")
             st.session_state.show_summary = False
         else:
-            # Proses data
             df["Tanggal Produksi"] = pd.to_datetime(df["Tanggal Produksi"], errors='coerce')
             df = df.dropna(subset=["Tanggal Produksi"])
             df["Bulan-Tahun"] = df["Tanggal Produksi"].dt.strftime('%Y-%m')
 
             bulan_options = sorted(df["Bulan-Tahun"].unique())
-            selected_bulan = st.selectbox("Pilih Bulan:", bulan_options)
+            selected_bulan = st.selectbox("Pilih Bulan:", bulan_options, key="bulan_summary")
 
             df_bulan = df[df["Bulan-Tahun"] == selected_bulan]
-            summary = df_bulan.groupby("Line Produksi")["Durasi"].sum().reset_index()
-            summary = summary.sort_values("Durasi", ascending=False)
 
-            st.write("### Total Durasi per Line Produksi:")
-            for idx, row in summary.iterrows():
-                st.write(f"- **{row['Line Produksi']}**: {int(row['Durasi'])} menit")
+            col1, col2 = st.columns(2)
 
-            st.write("---")
-            st.write("### Sample Komentar:")
-            for mesin in df_bulan["Line Produksi"].unique():
-                subdf = df_bulan[df_bulan["Line Produksi"] == mesin]
-                komentar_sample = subdf["Komentar"].dropna().unique()[:3]
-                st.write(f"**{mesin}**")
-                for kom in komentar_sample:
-                    st.write(f"- {kom}")
+            with col1:
+                st.markdown("#### ⏱ Total Durasi per Line Produksi:")
+                durasi_df = (
+                    df_bulan.groupby("Line Produksi")["Durasi"]
+                    .sum()
+                    .reset_index()
+                    .sort_values("Durasi", ascending=False)
+                )
+                durasi_df["Durasi"] = durasi_df["Durasi"].astype(int).astype(str) + " menit"
+                for _, row in durasi_df.iterrows():
+                    st.markdown(f"- **{row['Line Produksi']}**: {row['Durasi']}")
+
+            with col2:
+                st.markdown("#### 💬 Komentar per Line Produksi:")
+                komentar_df = (
+                    df_bulan.groupby("Line Produksi")["Komentar"]
+                    .agg(lambda x: ', '.join(sorted(set(x.dropna().astype(str)))))  # 1 baris unik
+                    .reset_index()
+                )
+                for _, row in komentar_df.iterrows():
+                    st.markdown(f"**{row['Line Produksi']}**")
+                    for komen in set(str(row['Komentar']).split(", ")):
+                        st.markdown(f"- {komen}")
+
+            st.markdown("### 📉 Grafik Top Downtime (Jenis + Komentar)")
+            df_bulan["Komentar_Normalized"] = (
+                df_bulan["Komentar"]
+                .fillna("Tanpa Komentar")
+                .str.lower()
+                .str.replace(r"\s+", " ", regex=True)
+                .str.strip()
+            )
+            df_bulan["Label"] = df_bulan["Jenis"] + " — " + df_bulan["Komentar_Normalized"]
+            top_summary = (
+                df_bulan.groupby("Label")["Durasi"]
+                .sum()
+                .sort_values(ascending=False)
+                .head(10)
+            )
+
+            fig, ax = plt.subplots(figsize=(9, 4.5))
+            ax.barh(top_summary.index[::-1], top_summary.values[::-1], color="salmon")
+            ax.set_xlabel("Durasi (menit)")
+            ax.set_title("Top 10 Downtime Berdasarkan Jenis + Komentar")
+            st.pyplot(fig)
+
+            if st.button("❌ Close Summary"):
+                st.session_state.show_summary = False
 
     except Exception as e:
-        st.error(f"❌ Gagal membaca Google Sheet: {e}")
+        st.error(f"Gagal memuat summary: {e}")
 
-    if st.button("❌ Close Summary"):
-        st.session_state.show_summary = False
-
-if st.session_state.get("username") == "admin":
     st.subheader("🔄 Reset Downtime Per Bulan")
-
+    
+if st.session_state.get("username") == "admin":
     try:
         gsheet = get_google_sheet("DATABASE")
         rows = gsheet.sheet1.get_all_records()
@@ -698,7 +766,7 @@ if st.session_state.get("username") == "admin":
             df["Bulan-Tahun"] = df["Tanggal Produksi"].dt.strftime('%Y-%m')
 
             bulan_options = sorted(df["Bulan-Tahun"].unique())
-            selected_bulan = st.selectbox("🗓 Pilih Bulan yang Akan Direset:", bulan_options)
+            selected_bulan = st.selectbox("🗓 Pilih Bulan yang Akan Direset:", bulan_options, key="bulan_reset")
 
             if st.button("🚨 Reset Downtime Bulan Ini"):
                 st.session_state["confirm_reset"] = True
